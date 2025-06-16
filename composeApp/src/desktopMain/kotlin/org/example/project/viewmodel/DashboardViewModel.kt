@@ -22,37 +22,43 @@ class DashboardViewModel(
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
     init {
-        loadInitialData()
+        loadDataFast()
     }
 
-    private fun loadInitialData() {
+    // FAST: Load everything in parallel
+    private fun loadDataFast() {
         screenModelScope.launch {
             _isLoading.value = true
+            val startTime = System.currentTimeMillis()
+
             try {
                 val currentYear = DateUtils.getCurrentYear()
                 val currentMonth = DateUtils.getCurrentMonth()
 
-                // Load all basic data
-                val groups = repository.getAllGroups(currentYear, currentMonth)
-                val subjects = repository.getAllSubjects(currentYear, currentMonth)
-                val availableMonths = repository.getAvailableMonths(currentYear)
-                val dashboardOverview = repository.getDashboardOverview(currentYear, currentMonth)
-                val dashboardStats = repository.getDashboardStats(currentYear, currentMonth)
+                // Get overview first (includes subjects/groups data)
+                val dashboardOverview = repository.getDashboardOverviewFast(currentYear, currentMonth)
+
+                // Get subject attendance for all subjects in parallel
+                val subjectAttendanceData = repository.getSubjectAttendanceFast(
+                    subjects = dashboardOverview.subjectStats.map { it.subject },
+                    year = currentYear,
+                    month = currentMonth
+                )
 
                 _uiState.value = _uiState.value.copy(
                     year = currentYear,
                     month = currentMonth,
-                    availableGroups = groups,
-                    availableSubjects = subjects,
-                    availableMonths = availableMonths,
+                    availableGroups = dashboardOverview.groupStats.map { it.group },
+                    availableSubjects = dashboardOverview.subjectStats.map { it.subject },
                     dashboardOverview = dashboardOverview,
-                    subjectAttendanceData = dashboardStats,
+                    subjectAttendanceData = subjectAttendanceData,
                     error = null
                 )
 
-                println("Smart Attend: Dashboard loaded - ${subjects.size} subjects, ${groups.size} groups")
+                val loadTime = System.currentTimeMillis() - startTime
+                println("Smart Attend: Dashboard loaded in ${loadTime}ms")
+
             } catch (e: Exception) {
-                println("Smart Attend: Error loading dashboard - ${e.message}")
                 _uiState.value = _uiState.value.copy(error = e.message)
             } finally {
                 _isLoading.value = false
@@ -62,12 +68,12 @@ class DashboardViewModel(
 
     fun filterByGroup(group: String?) {
         _uiState.value = _uiState.value.copy(selectedGroup = group)
-        loadData()
+        reloadWithFilters()
     }
 
     fun filterBySubject(subject: String?) {
         _uiState.value = _uiState.value.copy(selectedSubject = subject)
-        loadData()
+        applySubjectFilter()
     }
 
     fun changeMonth(year: Int, month: Int) {
@@ -77,51 +83,34 @@ class DashboardViewModel(
             selectedGroup = null,
             selectedSubject = null
         )
-        loadData()
+        loadDataFast()
     }
 
-    fun refreshData() {
-        loadData()
+    fun refreshData() = loadDataFast()
+
+    fun clearError() {
+        _uiState.value = _uiState.value.copy(error = null)
     }
 
-    private fun loadData() {
+    private fun reloadWithFilters() {
         screenModelScope.launch {
             _isLoading.value = true
             try {
-                val currentState = _uiState.value
-
-                // Load filtered data
-                val groups = repository.getAllGroups(currentState.year, currentState.month)
-                val subjects = repository.getAllSubjects(currentState.year, currentState.month)
-                val availableMonths = repository.getAvailableMonths(currentState.year)
-                val dashboardOverview = repository.getDashboardOverview(
-                    currentState.year,
-                    currentState.month,
-                    currentState.selectedGroup
-                )
-                val dashboardStats = repository.getDashboardStats(
-                    currentState.year,
-                    currentState.month,
-                    currentState.selectedGroup
+                val state = _uiState.value
+                val dashboardOverview = repository.getDashboardOverviewFast(state.year, state.month, state.selectedGroup)
+                val subjectAttendanceData = repository.getSubjectAttendanceFast(
+                    subjects = dashboardOverview.subjectStats.map { it.subject },
+                    year = state.year,
+                    month = state.month,
+                    group = state.selectedGroup
                 )
 
-                // Apply subject filter if selected
-                val filteredStats = if (currentState.selectedSubject != null) {
-                    dashboardStats.filterKeys { it == currentState.selectedSubject }
-                } else {
-                    dashboardStats
-                }
-
-                _uiState.value = currentState.copy(
-                    availableGroups = groups,
-                    availableSubjects = subjects,
-                    availableMonths = availableMonths,
+                _uiState.value = state.copy(
                     dashboardOverview = dashboardOverview,
-                    subjectAttendanceData = filteredStats,
+                    subjectAttendanceData = subjectAttendanceData,
                     error = null
                 )
             } catch (e: Exception) {
-                println("Smart Attend: Error loading filtered data - ${e.message}")
                 _uiState.value = _uiState.value.copy(error = e.message)
             } finally {
                 _isLoading.value = false
@@ -129,19 +118,14 @@ class DashboardViewModel(
         }
     }
 
-    fun clearError() {
-        _uiState.value = _uiState.value.copy(error = null)
-    }
-
-    fun exportData(format: ExportFormat) {
-        screenModelScope.launch {
-            try {
-                // TODO: Implement export functionality
-                println("Smart Attend: Exporting data in $format format")
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(error = "Export failed: ${e.message}")
-            }
+    private fun applySubjectFilter() {
+        val state = _uiState.value
+        val filteredData = if (state.selectedSubject != null) {
+            state.subjectAttendanceData.filterKeys { it == state.selectedSubject }
+        } else {
+            state.subjectAttendanceData
         }
+        _uiState.value = state.copy(subjectAttendanceData = filteredData)
     }
 }
 
@@ -152,12 +136,8 @@ data class DashboardUiState(
     val selectedSubject: String? = null,
     val availableGroups: List<String> = emptyList(),
     val availableSubjects: List<String> = emptyList(),
-    val availableMonths: List<Int> = emptyList(),
+    val availableMonths: List<Int> = listOf(DateUtils.getCurrentMonth()),
     val dashboardOverview: DashboardOverview = DashboardOverview(0, 0, 0.0, emptyList(), emptyList()),
     val subjectAttendanceData: Map<String, SubjectAttendance> = emptyMap(),
     val error: String? = null
 )
-
-enum class ExportFormat {
-    PDF, CSV, EXCEL
-}
