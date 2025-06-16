@@ -58,7 +58,7 @@ class StudentDetailScreen(private val rollNumber: String) : Screen {
 
         Box(modifier = Modifier.fillMaxSize()) {
             if (!isInitialized) {
-                InitializingScreen()
+                InitializingScreen1()
             } else {
                 StudentDetailContent(
                     rollNumber = rollNumber,
@@ -74,7 +74,7 @@ class StudentDetailScreen(private val rollNumber: String) : Screen {
 }
 
 @Composable
-private fun InitializingScreen() {
+private fun InitializingScreen1() {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -132,7 +132,7 @@ private fun StudentDetailContent(
 
         // Error handling
         uiState.error?.let { error ->
-            ErrorCard(
+            ErrorCard1(
                 error = error,
                 onDismiss = onErrorDismiss,
                 modifier = Modifier
@@ -143,7 +143,7 @@ private fun StudentDetailContent(
 
         // Content
         if (isLoading) {
-            LoadingContent()
+            LoadingContent1()
         } else if (uiState.subjectWiseAttendance.isEmpty()) {
             EmptyStateCard(rollNumber, uiState.year, uiState.month)
         } else {
@@ -490,7 +490,7 @@ private fun SubjectDetailCard(subject: String, stats: AttendanceStats) {
 }
 
 @Composable
-private fun LoadingContent() {
+private fun LoadingContent1() {
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
@@ -513,7 +513,7 @@ private fun LoadingContent() {
 }
 
 @Composable
-private fun ErrorCard(
+private fun ErrorCard1(
     error: String,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
